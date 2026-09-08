@@ -92,6 +92,38 @@ def check_proper_noun_coverage(source, target, glossary: dict | None = None) -> 
     return warnings
 
 
+def _align_paragraphs(src_paras: list[str], tr_paras: list[str]) -> list[tuple[int, int]]:
+    """Kaynak/hedef paragrafları hizalar (sayılar eşit değilse difflib ile).
+
+    Dönen: [(src_idx, tr_idx)] — eşleşemeyen kaynak paragrafı tr_idx=-1 alır.
+    """
+    import difflib
+
+    if len(src_paras) == len(tr_paras):
+        return list(zip(range(len(src_paras)), range(len(tr_paras))))
+    if not src_paras or not tr_paras:
+        return [(i, -1) for i in range(len(src_paras))]
+    sm = difflib.SequenceMatcher(a=None, b=None, autojunk=False)
+    # Karşılaştırma anahtarı: sayılar + ilk kelimeler (dilden bağımsız iskelet).
+    key = lambda p: (tuple(_DIGIT_RUN_RE.findall(p)), tuple(p.split()[:4]))
+    sm.set_seqs([key(p) for p in src_paras], [key(p) for p in tr_paras])
+    pairs: list[tuple[int, int]] = []
+    used_tr: set[int] = set()
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for i, j in zip(range(i1, i2), range(j1, j2)):
+                pairs.append((i, j))
+                used_tr.add(j)
+        else:
+            free = [j for j in range(j1, j2) if j not in used_tr]
+            for k, i in enumerate(range(i1, i2)):
+                j = free[k] if k < len(free) else -1
+                pairs.append((i, j))
+                if j >= 0:
+                    used_tr.add(j)
+    return sorted(pairs)
+
+
 def check_glossary_coverage(source, target, glossary: dict | None = None) -> list[str]:
     """Sözlükteki her kaynak terim hedefte karşılığıyla geçmeli.
 
@@ -105,6 +137,8 @@ def check_glossary_coverage(source, target, glossary: dict | None = None) -> lis
 
     src_paras = [p.text for s in source.sections for p in s.paragraphs]
     tr_paras = [p.text for s in target.sections for p in s.paragraphs]
+    aligned = _align_paragraphs(src_paras, tr_paras)
+    tr_by_src = {i: j for i, j in aligned}
 
     for en_term, tr_term in glossary.items():
         en_term = str(en_term)
@@ -113,10 +147,13 @@ def check_glossary_coverage(source, target, glossary: dict | None = None) -> lis
             continue
         en_pat = re.compile(r"(?<!\w)" + re.escape(en_term) + r"(?!\w)", re.IGNORECASE)
         tr_pat = re.compile(r"(?<!\w)" + re.escape(tr_term) + r"(?!\w)", re.IGNORECASE)
-        hit_paras = [i + 1 for i, p in enumerate(src_paras) if en_pat.search(p)]
-        if not hit_paras:
+        hit_src = [i for i, p in enumerate(src_paras) if en_pat.search(p)]
+        if not hit_src:
             continue
-        bad = [i for i in hit_paras if i - 1 >= len(tr_paras) or not tr_pat.search(tr_paras[i - 1])]
+        bad = [
+            i + 1 for i in hit_src
+            if tr_by_src.get(i, -1) < 0 or not tr_pat.search(tr_paras[tr_by_src[i]])
+        ]
         if bad:
             shown = bad[:5]
             extra = f" (+{len(bad) - len(shown)} paragraf daha)" if len(bad) > len(shown) else ""

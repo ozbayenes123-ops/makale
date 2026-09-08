@@ -141,6 +141,92 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _cmd_diff(args) -> int:
+    from makale_pipeline.textdiff import compare_versions, para_diff
+
+    if args.new:
+        res = compare_versions(Path(args.source), Path(args.new))
+    else:
+        res = para_diff(Path(args.source))
+    print(json.dumps(res, ensure_ascii=False, indent=1)[:6000])
+    return 0 if res.get("ok") else 1
+
+
+def _cmd_chunks(args) -> int:
+    from makale_pipeline.textdiff import chunk_prompts
+
+    res = chunk_prompts(Path(args.source), args.max_chars)
+    if not res.get("ok"):
+        print(json.dumps(res, ensure_ascii=False))
+        return 1
+    for p in res["prompts"]:
+        print(f"===== PARÇA {p['part']} ({', '.join(p['sections'])}) =====")
+        print(p["prompt"])
+    return 0
+
+
+def _cmd_terms(args) -> int:
+    from makale_pipeline.terminology import (
+        add_to_glossary,
+        corpus_consistency,
+        extract_candidates,
+    )
+
+    if args.corpus:
+        print(json.dumps(corpus_consistency(), ensure_ascii=False, indent=1)[:4000])
+        return 0
+    res = extract_candidates(Path(args.source), args.top)
+    print(json.dumps(res, ensure_ascii=False, indent=1)[:4000])
+    if args.add and res.get("ok"):
+        entries = {c["term"]: c["term"] for c in res["candidates"][: args.add]}
+        print(json.dumps(add_to_glossary(Path(args.source), entries), ensure_ascii=False))
+    return 0
+
+
+def _cmd_cite(args) -> int:
+    from makale_pipeline.citations import bibliography, citation_check
+
+    rep = citation_check(Path(args.path))
+    print(json.dumps(rep, ensure_ascii=False, indent=1))
+    if args.biblio and rep.get("ok"):
+        print(json.dumps(bibliography(Path(args.path)), ensure_ascii=False))
+    return 0 if rep.get("ok") and not rep.get("warnings") else 1
+
+
+def _cmd_feedback(args) -> int:
+    from makale_pipeline.feedback import read_feedback
+
+    print(json.dumps(read_feedback(Path(args.docx)), ensure_ascii=False, indent=1)[:5000])
+    return 0
+
+
+def _cmd_fix(args) -> int:
+    from makale_pipeline.fixer import fix_file
+
+    print(json.dumps(fix_file(Path(args.path), not args.no_apply), ensure_ascii=False, indent=1)[:4000])
+    return 0
+
+
+def _cmd_pdf(args) -> int:
+    from makale_pipeline.pdfexport import export_pdf
+
+    out = Path(args.output) if args.output else None
+    print(json.dumps(export_pdf(Path(args.docx), out), ensure_ascii=False))
+    return 0
+
+
+def _cmd_tmem(args) -> int:
+    from makale_pipeline import tmem
+
+    if args.action == "record":
+        print(json.dumps(tmem.record(Path(args.source)), ensure_ascii=False))
+    else:
+        doc_dir = Path(args.source)
+        doc_dir = doc_dir if doc_dir.is_dir() else doc_dir.parent
+        print(json.dumps(tmem.suggest(doc_dir, args.text), ensure_ascii=False, indent=1)[:3000])
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="makale", description="Akademik makale çeviri ve derleme sistemi")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -171,6 +257,32 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("semantic", help="Semantik bütünlük kontrolü (veri korunumu + cümle kalitesi)")
     p.add_argument("source")
     p.add_argument("--summary", action="store_true")
+    p = sub.add_parser("diff", help="Kaynak/hedef paragraf farkı veya iki revizyon karşılaştırma")
+    p.add_argument("source")
+    p.add_argument("--new", default=None)
+    p = sub.add_parser("chunks", help="Uzun belge için parçalı çeviri promptları")
+    p.add_argument("source")
+    p.add_argument("--max-chars", type=int, default=12000)
+    p = sub.add_parser("terms", help="Terim adayı çıkar / külliyat tutarlılığı")
+    p.add_argument("source", nargs="?", default=None)
+    p.add_argument("--top", type=int, default=40)
+    p.add_argument("--add", type=int, default=0)
+    p.add_argument("--corpus", action="store_true")
+    p = sub.add_parser("cite", help="Atıf denetimi (+--biblio ile kaynakça)")
+    p.add_argument("path")
+    p.add_argument("--biblio", action="store_true")
+    p = sub.add_parser("feedback", help="Word izlenen değişiklik/yorum raporu")
+    p.add_argument("docx")
+    p = sub.add_parser("fix", help="Mekanik kalite düzeltmesi + öneriler")
+    p.add_argument("path")
+    p.add_argument("--no-apply", action="store_true")
+    p = sub.add_parser("pdf", help="DOCX -> PDF (Word gerekir)")
+    p.add_argument("docx")
+    p.add_argument("--output", default=None)
+    p = sub.add_parser("tmem", help="Çeviri belleği kaydı/önerisi")
+    p.add_argument("action", choices=["record", "suggest"])
+    p.add_argument("source")
+    p.add_argument("--text", default="")
     sub.add_parser("serve", help="MCP sunucusunu stdio üzerinden çalıştır")
     return ap
 
@@ -182,6 +294,9 @@ def main(argv: list[str] | None = None) -> int:
         "validate": _cmd_validate, "compile": _cmd_compile, "index": _cmd_index,
         "search": _cmd_search, "quality": _cmd_quality, "glossary": _cmd_glossary,
         "stats": _cmd_stats, "docs": _cmd_docs, "semantic": _cmd_semantic,
+        "diff": _cmd_diff, "chunks": _cmd_chunks, "terms": _cmd_terms,
+        "cite": _cmd_cite, "feedback": _cmd_feedback, "fix": _cmd_fix,
+        "pdf": _cmd_pdf, "tmem": _cmd_tmem,
         "serve": _cmd_serve,
     }
     try:
