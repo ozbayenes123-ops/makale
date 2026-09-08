@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "makale-pipeline"
-version = "5.0.0"
+version = "5.1.0"
 description = "Akademik makale çeviri ve derleme sistemi (IDE tabanlı AI destekli) + MCP sunucusu. Birincil çıktı: makale formatında Word (.docx); HTML isteğe bağlı."
 readme = "README.md"
 requires-python = ">=3.11"
