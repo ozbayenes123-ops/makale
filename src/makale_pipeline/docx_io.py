@@ -16,10 +16,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from docx import Document as open_docx
-from docx.shared import Pt
 
 from makale_pipeline.models import Footnote
-from makale_pipeline.structured import parse_file
 
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -44,9 +42,62 @@ def _read_footnotes(docx_path: Path) -> list[Footnote]:
     return notes
 
 
+def _para_footnote_ids(docx_path: Path) -> list[list[str]]:
+    """document.xml'deki paragrafların dipnot gönderimlerini sırayla çıkarır.
+
+    Dönen liste, _docx_to_structured'daki gövde paragraflarıyla aynı sıradadır;
+    her öğe o paragraftaki footnote id listesidir.
+    """
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            if "word/document.xml" not in zf.namelist():
+                return []
+            root = ElementTree.fromstring(zf.read("word/document.xml"))
+    except (OSError, ElementTree.ParseError):
+        return []
+    out: list[list[str]] = []
+    for para in root.iter(f"{_W_NS}p"):
+        ids = [
+            fr.get(f"{_W_NS}id")
+            for fr in para.iter(f"{_W_NS}footnoteReference")
+            if fr.get(f"{_W_NS}id") is not None
+        ]
+        # Sadece gövde paragrafı sayılanlara (metin içeren) karşılık için
+        # tüm paragrafları kaydet; eşleme metin bazında hizalanır.
+        text = "".join(t.text or "" for t in para.iter(f"{_W_NS}t")).strip()
+        out.append((text, ids))
+    return out
+
+
+def _norm_text(t: str) -> str:
+    return re.sub(r"\s+", " ", t or "").strip()
+
+
 def _docx_to_structured(docx_path: Path) -> str:
-    """DOCX paragraf stillerini yapılandırılmış TXT etiketlerine çevirir."""
+    """DOCX paragraf stillerini yapılandırılmış TXT etiketlerine çevirir.
+
+    Metin-içi dipnot gönderimleri korunur: document.xml'deki
+    footnoteReference sırasına göre paragraflara [fn N] işaretleri eklenir.
+    """
     doc = open_docx(str(docx_path))
+    xml_paras = _para_footnote_ids(docx_path)
+    xml_idx = 0
+    id2num: dict[str, str] = {}
+
+    def take_ids(norm: str) -> list[str]:
+        nonlocal xml_idx
+        while xml_idx < len(xml_paras):
+            t, ids = xml_paras[xml_idx]
+            xml_idx += 1
+            if _norm_text(t) == norm:
+                return ids
+        return []
+
+    def num_of(fid: str) -> str:
+        if fid not in id2num:
+            id2num[fid] = str(len(id2num) + 1)
+        return id2num[fid]
+
     title = ""
     subtitle = ""
     body_items: list[str] = []
@@ -61,22 +112,27 @@ def _docx_to_structured(docx_path: Path) -> str:
             continue
         if "title" in style and "subtitle" not in style:
             title = title or text
+            take_ids(_norm_text(text))
             continue
         if "subtitle" in style:
             subtitle = subtitle or text
+            take_ids(_norm_text(text))
             continue
         if style.startswith("heading 1") or style.startswith("başlık 1"):
             if section_open:
                 body_items.append("[/SECTION]")
             sec_counter += 1
+            take_ids(_norm_text(text))
             body_items.append(f'[SECTION id="sec{sec_counter}" title="{text}"]')
             section_open = True
             continue
         if style.startswith("heading") or style.startswith("başlık"):
+            take_ids(_norm_text(text))
             body_items.append(f'[SUBSECTION title="{text}"]')
             continue
         clean = re.sub(r"\s+", " ", text)
-        body_items.append(f"p{p_counter}: {clean}")
+        markers = "".join(f" [fn {num_of(fid)}]" for fid in take_ids(clean))
+        body_items.append(f"p{p_counter}: {clean}{markers}")
         p_counter += 1
 
     if section_open:
@@ -92,11 +148,17 @@ def _docx_to_structured(docx_path: Path) -> str:
     lines.append("[/BODY]")
 
     footnotes = _read_footnotes(docx_path)
-    if footnotes:
+    if footnotes or id2num:
+        by_id = {fn.num: fn.text for fn in footnotes}
+        ordered = sorted(id2num.items(), key=lambda kv: int(kv[1]))
         lines.append("")
         lines.append("[FOOTNOTES]")
+        for fid, num in ordered:
+            if fid in by_id:
+                lines.append(f"{num}: {by_id[fid]}")
         for fn in footnotes:
-            lines.append(f"{fn.num}: {fn.text}")
+            if fn.num not in id2num:
+                lines.append(f"{fn.num}: {fn.text}")
         lines.append("[/FOOTNOTES]")
     return "\n".join(lines)
 
@@ -122,47 +184,15 @@ def read_docx(docx_path: Path | str, output_path: Path | str | None = None) -> d
 def export_docx(
     translation_path: Path | str,
     output_path: Path | str | None = None,
+    style: dict | None = None,
 ) -> dict:
-    """Yapılandırılmış _tr.txt dosyasını biçimli Word belgesine derler."""
+    """Yapılandırılmış _tr.txt dosyasını makale formatında Word'e derler.
+
+    Basit derleyici tarihe karıştı; makale derleyiciye delege eder.
+    """
+    from makale_pipeline.article_docx import export_article_docx
+    from makale_pipeline.config import load_config
+
     tr = Path(translation_path)
-    if not tr.exists():
-        raise FileNotFoundError(f"Çeviri dosyası yok: {tr}")
-    doc_model = parse_file(tr)
-    if not doc_model.is_structured:
-        raise ValueError(f"Yapılandırılmamış belge değil ([BODY] yok): {tr.name}")
-
-    doc = open_docx()
-    if doc_model.title:
-        doc.add_heading(doc_model.title, level=0)
-    if doc_model.subtitle:
-        p = doc.add_paragraph()
-        r = p.add_run(doc_model.subtitle)
-        r.italic = True
-
-    for section in doc_model.sections:
-        if section.title and section.title != "GÖVDE":
-            doc.add_heading(section.title, level=1)
-        for sub in section.subsections:
-            doc.add_heading(sub.title, level=2)
-        for para in section.paragraphs:
-            if para.text:
-                doc.add_paragraph(para.text)
-
-    if doc_model.footnotes:
-        doc.add_heading("Dipnotlar", level=1)
-        for fn in doc_model.footnotes:
-            p = doc.add_paragraph()
-            r = p.add_run(f"{fn.num}. ")
-            r.bold = True
-            p.add_run(fn.text)
-            p.paragraph_format.left_indent = Pt(12)
-
-    out = Path(output_path) if output_path else tr.with_suffix(".docx")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(out))
-    return {
-        "source": str(tr),
-        "output": str(out),
-        "paragraphs": doc_model.paragraph_count,
-        "footnotes": doc_model.footnote_count,
-    }
+    cfg = style if style is not None else load_config(tr.parent).get("docx", {})
+    return export_article_docx(tr, output_path, style=cfg)

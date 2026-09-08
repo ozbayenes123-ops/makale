@@ -14,7 +14,7 @@ from makale_pipeline.paths import find_source_files, target_path_for_source
 from makale_pipeline.structured import is_structured_document
 
 
-def _compile_one(tr: Path, force: bool) -> dict:
+def compile_one(tr: Path, force: bool) -> dict:
     config = load_config(tr.parent)
     formats = [str(f).lower() for f in (config.get("output_formats") or ["docx"])]
     made: list[str] = []
@@ -68,9 +68,9 @@ def compile_all(
     results: list[dict] = []
     if parallel and len(targets) > 1:
         with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(lambda t: _compile_one(t, force), targets))
+            results = list(pool.map(lambda t: compile_one(t, force), targets))
     else:
-        results = [_compile_one(t, force) for t in targets]
+        results = [compile_one(t, force) for t in targets]
 
     made = sum(len(r["made"]) for r in results)
     errors = [e for r in results for e in r["errors"]]

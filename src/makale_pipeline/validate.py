@@ -38,15 +38,23 @@ SHORT_SENTENCE_THRESHOLD = 5
 
 DIR_SUFFIX_RE = re.compile(r"\b\w+[dDtT][ıiİİ][rR]\b")
 
+# Dipnot içi atıf kısaltmaları: kısa-cümle ve Arapça etkisi denetiminden muaftır.
+CITATION_SENT_RE = re.compile(
+    r"^\s*(s\.|ss\.|p\.|pp\.|c\.|bkz\.?|krş\.?|krş|ibid\.?|a\.g\.e\.?|a\.g\.m\.?|"
+    r"çev\.?|haz\.?|ed\.?|yay\.?|no\.?|nr\.?|v\.|vv\.|md\.?)\b",
+    re.IGNORECASE,
+)
 
-def _sentences_of(doc) -> list[str]:
-    """Paragraf ve dipnot metinlerini cümlelere böler (işaretleme dışı)."""
-    chunks = [p.text for s in doc.sections for p in s.paragraphs]
-    chunks.extend(fn.text for fn in doc.footnotes)
-    sentences: list[str] = []
-    for chunk in chunks:
+
+def _sentences_of(doc) -> list[tuple[str, bool]]:
+    """(cümle, dipnot_mi) çiftleri: paragraf ve dipnot metinlerinden."""
+    sentences: list[tuple[str, bool]] = []
+    for chunk in [p.text for s in doc.sections for p in s.paragraphs]:
         for sent in re.split(r"[.!?]+", chunk):
-            sentences.append(sent)
+            sentences.append((sent, False))
+    for chunk in [fn.text for fn in doc.footnotes]:
+        for sent in re.split(r"[.!?]+", chunk):
+            sentences.append((sent, True))
     return sentences
 
 
@@ -130,10 +138,12 @@ def validate_pair(source_path: Path, target_path: Path) -> list[str]:
         warnings.append(qa)
 
     sentences = _sentences_of(target)
-    for sent in sentences:
+    for sent, is_footnote in sentences:
         words = sent.strip().split()
         if not words:
             continue
+        if is_footnote and CITATION_SENT_RE.match(sent.strip()):
+            continue  # dipnot atıf kısaltması (s. 42, bkz. vb.)
         first_word = words[0].lower()
         if any(first_word.startswith(p) for p in ("p", "fn", "http", "www", "krş", "bkz")):
             continue

@@ -150,11 +150,11 @@ async def tool_compile_all(force: bool = False, parallel: bool = True) -> str:
              description="Tek çeviriyi derler (Word öncelikli).")
 async def tool_compile_document(translation_path: str, force: bool = True) -> str:
     try:
-        from makale_pipeline.pipeline import _compile_one
+        from makale_pipeline.pipeline import compile_one
         from makale_pipeline.paths import resolve_path
 
         tr = resolve_path(PROJECT_ROOT, translation_path)
-        return _ok(_compile_one(tr, force))
+        return _ok(compile_one(tr, force))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -455,6 +455,213 @@ async def prompt_process_new_document() -> str:
         "4. translate_apply ile doğrula ve Word (.docx) derle.\n"
         "5. validate_document + semantic_check ile son denetimi yap."
     )
+
+
+@server.tool(
+    name="translation_memory",
+    title="Çeviri Belleği",
+    description=(
+        "Onaylı çeviri çiftlerini belleğe yazar (action=record) veya benzer "
+        "kaynak için önceki karşılığı önerir (action=suggest, text gerekir)."
+    ),
+)
+async def tool_translation_memory(
+    action: str, source_path: str, text: str = ""
+) -> str:
+    try:
+        from makale_pipeline import tmem
+        from makale_pipeline.paths import resolve_path
+
+        if action == "record":
+            return _ok(tmem.record(resolve_path(PROJECT_ROOT, source_path)))
+        if action == "suggest":
+            doc_dir = resolve_path(PROJECT_ROOT, source_path)
+            doc_dir = doc_dir if doc_dir.is_dir() else doc_dir.parent
+            return _ok(tmem.suggest(doc_dir, text))
+        return _ok({"ok": False, "error": f"Bilinmeyen action: {action}"})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="translate_diff",
+    title="Çeviri Farkı",
+    description="Kaynak/hedef paragrafları hizalar; eksik/fazla paragrafları listeler.",
+)
+async def tool_translate_diff(source_path: str) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.textdiff import para_diff
+
+        return _ok(para_diff(resolve_path(PROJECT_ROOT, source_path)))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="compare_versions",
+    title="Revizyon Karşılaştır",
+    description="İki _tr revizyonu arasındaki paragraf farkını döndürür.",
+)
+async def tool_compare_versions(old_path: str, new_path: str) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.textdiff import compare_versions
+
+        return _ok(compare_versions(
+            resolve_path(PROJECT_ROOT, old_path),
+            resolve_path(PROJECT_ROOT, new_path),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="chunk_translate",
+    title="Parçalı Çeviri Promptu",
+    description="Uzun belgeyi bölüm gruplarına bölüp her parça için prompt üretir.",
+)
+async def tool_chunk_translate(source_path: str, max_chars: int = 12000) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.textdiff import chunk_prompts
+
+        res = chunk_prompts(resolve_path(PROJECT_ROOT, source_path), max_chars)
+        if not res.get("ok"):
+            return _ok(res)
+        total = sum(len(p["prompt"]) for p in res["prompts"])
+        return _ok({"ok": True, "parts": res["parts"],
+                    "total_chars": total,
+                    "prompts": res["prompts"]})
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="glossary_extract",
+    title="Terim Çıkar",
+    description="Kaynaktan sözlük adayı terimleri sıklıkla çıkarır.",
+)
+async def tool_glossary_extract(source_path: str, top: int = 40) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.terminology import extract_candidates
+
+        return _ok(extract_candidates(resolve_path(PROJECT_ROOT, source_path), top))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="glossary_add",
+    title="Sözlüğe Ekle",
+    description="Seçili terimleri belgenin config.json sözlüğüne ekler.",
+)
+async def tool_glossary_add(source_path: str, entries: dict) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.terminology import add_to_glossary
+
+        return _ok(add_to_glossary(resolve_path(PROJECT_ROOT, source_path), entries))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="terminology_corpus",
+    title="Külliyat Tutarlılığı",
+    description="Tüm külliyatta sözlük terimlerinin belge bazında kapsama matrisi.",
+)
+async def tool_terminology_corpus() -> str:
+    try:
+        from makale_pipeline.terminology import corpus_consistency
+
+        return _ok(corpus_consistency())
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="citation_check",
+    title="Atıf Denetle",
+    description="Dipnot gönderim/tanım eşleşmesi, sıra ve tekrar atıfları denetler.",
+)
+async def tool_citation_check(translation_path: str) -> str:
+    try:
+        from makale_pipeline.citations import citation_check
+        from makale_pipeline.paths import resolve_path
+
+        return _ok(citation_check(resolve_path(PROJECT_ROOT, translation_path)))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="bibliography",
+    title="Kaynakça Üret",
+    description="Dipnot listesinden tekilleştirilmiş kaynakça dosyası üretir.",
+)
+async def tool_bibliography(
+    translation_path: str, output_path: str | None = None
+) -> str:
+    try:
+        from makale_pipeline.citations import bibliography
+        from makale_pipeline.paths import resolve_path
+
+        tr = resolve_path(PROJECT_ROOT, translation_path)
+        out = resolve_path(PROJECT_ROOT, output_path) if output_path else None
+        return _ok(bibliography(tr, out))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="read_feedback",
+    title="Geri Bildirimi Oku",
+    description="Word'deki izlenen değişiklikleri ve yorumları raporlar.",
+)
+async def tool_read_feedback(docx_path: str) -> str:
+    try:
+        from makale_pipeline.feedback import read_feedback
+        from makale_pipeline.paths import resolve_path
+
+        return _ok(read_feedback(resolve_path(PROJECT_ROOT, docx_path)))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="quality_fix",
+    title="Kalite Düzelt",
+    description="Mekanik sorunları düzeltir; yasaklı kalıplara öneri üretir.",
+)
+async def tool_quality_fix(translation_path: str, apply_safe: bool = True) -> str:
+    try:
+        from makale_pipeline.fixer import fix_file
+        from makale_pipeline.paths import resolve_path
+
+        return _ok(fix_file(resolve_path(PROJECT_ROOT, translation_path), apply_safe))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@server.tool(
+    name="export_pdf",
+    title="PDF'e Aktar",
+    description="Derlenmiş .docx dosyasını PDF'e çevirir (Word gerekir).",
+)
+async def tool_export_pdf(
+    docx_path: str, output_path: str | None = None
+) -> str:
+    try:
+        from makale_pipeline.paths import resolve_path
+        from makale_pipeline.pdfexport import export_pdf
+
+        src = resolve_path(PROJECT_ROOT, docx_path)
+        out = resolve_path(PROJECT_ROOT, output_path) if output_path else None
+        return _ok(export_pdf(src, out))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 def run_stdio() -> None:

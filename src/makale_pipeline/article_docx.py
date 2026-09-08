@@ -323,10 +323,7 @@ def export_article_docx(
 
     out = Path(output_path) if output_path else tr.with_suffix(".docx")
     out.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        doc.save(str(out))
-    except ValueError:
-        _save_without_lxml(doc, out)
+    doc.save(str(out))
     return {
         "source": str(tr),
         "output": str(out),
@@ -335,18 +332,3 @@ def export_article_docx(
         "real_footnotes": len(mapping),
         "format": "makale",
     }
-
-
-def _save_without_lxml(doc, out: Path):
-    """lxml yoksa footnotes.xml'i standart kütüphaneyle serileştirip kaydeder."""
-    import io
-    from xml.etree import ElementTree
-
-    for partname, part in doc.part.package.iter_parts():
-        if str(partname) == "/word/footnotes.xml":
-            root = ElementTree.fromstring(part.blob)
-            buf = io.BytesIO()
-            ElementTree.ElementTree(root).write(buf, xml_declaration=True, encoding="UTF-8")
-            part._blob = buf.getvalue()
-            break
-    doc.save(str(out))

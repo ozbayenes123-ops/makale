@@ -12,9 +12,6 @@ import re
 MAX_SAME_STARTER = 3
 
 CLOSING_CLICHES = [
-    "sonuç olarak",
-    "özetle",
-    "kısacası",
     "genel olarak bakıldığında",
     "tüm bunlar göz önüne alındığında",
 ]
