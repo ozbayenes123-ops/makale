@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "makale-pipeline"
+version = "5.0.0"
+description = "Akademik makale çeviri ve derleme sistemi (IDE tabanlı AI destekli) + MCP sunucusu. Birincil çıktı: makale formatında Word (.docx); HTML isteğe bağlı."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.0.0",
+    "PyMuPDF>=1.23.0",
+    "python-docx>=1.1",
+    "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.0.0",
+    "pytest-mock>=3.14.0",
+    "PyMuPDF>=1.23.0",
+    "tqdm>=4.66.0",
+]
+all = [
+    "mcp>=2.0.0",
+    "PyMuPDF>=1.23.0",
+    "tqdm>=4.66.0",
+]
+ocr = [
+    "PyMuPDF>=1.23.0",
+    "easyocr>=1.7.2",
+]
+
+[project.scripts]
+makale = "makale_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+asyncio_mode = "auto"
