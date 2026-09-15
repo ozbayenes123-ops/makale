@@ -12,7 +12,7 @@ Akademik makale çeviri ve derleme sistemi (IDE tabanlı AI destekli) + MCP sunu
 ## Kurulum
 
 ```bash
-uv sync --project C:\dev\mcp\makale
+uv sync --project <KURULUM_KÖKÜ>\makale
 ```
 
 ## CLI
@@ -33,7 +33,7 @@ makale serve             # MCP sunucusu (stdio)
 ## MCP
 
 ```bash
-uv run --project C:\dev\mcp\makale makale serve
+uv run --project <KURULUM_KÖKÜ>\makale makale serve
 ```
 
 24 araç: doc_status, ocr_health, ocr_document, translate_prep/apply,
@@ -60,3 +60,19 @@ Belge `config.json` içine `docx` bölümü:
 ```
 
 Tüm anahtarlar için `src/makale_pipeline/config.py` → `DEFAULT_DOCX`.
+
+## Command Code kaydı
+
+`~/.commandcode/mcp.json` (`cmdc-stack` deposundaki `scripts/register-mcp.ps1` üretir):
+
+```json
+{
+  "mcpServers": {
+    "makale": {
+      "transport": "stdio",
+      "command": "uv",
+      "args": ["run", "--project", "<KURULUM_KÖKÜ>\\makale", "makale", "serve"]
+    }
+  }
+}
+```
