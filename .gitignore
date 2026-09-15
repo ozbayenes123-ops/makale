@@ -9,3 +9,4 @@ scratch/*
 !scratch/.gitkeep
 incoming/*
 !incoming/.gitkeep
+documents/
