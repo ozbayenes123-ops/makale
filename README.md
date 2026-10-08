@@ -76,3 +76,7 @@ Tüm anahtarlar için `src/makale_pipeline/config.py` → `DEFAULT_DOCX`.
   }
 }
 ```
+
+## İlişkili skill'ler
+
+- `skills/makale-translation/` — makale MCP ile makale çeviri iş akışı (DergiPark önerileri, formül→nesir, PDF→yapı).
