@@ -1,12 +1,16 @@
-__pycache__/
-*.pyc
+# Hermes local assets — do not commit
+node_modules/
 .venv/
-*.egg-info/
+venv/
 dist/
 build/
-.pytest_cache/
-scratch/*
-!scratch/.gitkeep
-incoming/*
-!incoming/.gitkeep
-documents/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.env.*
+!.env.example
+*.pem
+*.key
+*.log
+.cache/
