@@ -25,7 +25,14 @@ from docx.shared import Cm, Pt, RGBColor
 from lxml import etree
 
 from makale_pipeline.config import DEFAULT_DOCX
-from makale_pipeline.structured import FN_REF_RE, parse_file
+from makale_pipeline.paths import find_source_for_target
+from makale_pipeline.structured import (
+    FN_REF_RE,
+    parse_file,
+    source_contains_toc_heading,
+)
+
+_FOOTNOTE_MODES = ("auto", "on", "off")
 
 _FOOTNOTES_CT = (
     "application/vnd.openxmlformats-officedocument"
@@ -54,6 +61,54 @@ def _merge_style(override: dict | None) -> dict:
             else:
                 merged[key] = value
     return merged
+
+
+def resolve_footnote_mode(style: dict) -> str:
+    """Dipnot kipini çözer: 'auto' | 'on' | 'off' (bool de kabul edilir)."""
+    mode = style.get("footnotes", "auto")
+    if isinstance(mode, bool):
+        return "on" if mode else "off"
+    mode = str(mode).strip().lower()
+    return mode if mode in _FOOTNOTE_MODES else "auto"
+
+
+def resolve_toc_decision(
+    style: dict, doc_model, translation_path: Path
+) -> tuple[bool, str]:
+    """İçindekiler kararını verir.
+
+    docx.toc=true/false zorlar; "auto" ise yalnızca yapılandırılmış taslakta
+    [TOC] girişleri veya kaynak dosyada gerçek bir içindekiler başlığı varsa
+    eklenir. Dönen: (eklensin_mi, kip).
+    """
+    raw = style.get("toc", "auto")
+    if isinstance(raw, bool):
+        return raw, "on" if raw else "off"
+    if isinstance(raw, str):
+        low = raw.strip().lower()
+        if low in ("true", "on", "yes", "1"):
+            return True, "on"
+        if low in ("false", "off", "no", "0"):
+            return False, "off"
+    # "auto" (veya tanınmayan değer): varlığa bak.
+    if doc_model.toc:
+        return True, "auto"
+    source = find_source_for_target(Path(translation_path))
+    if source is not None:
+        try:
+            if source_contains_toc_heading(source.read_text(encoding="utf-8")):
+                return True, "auto"
+        except OSError:
+            pass
+    return False, "auto"
+
+
+def _strip_fn_refs(text: str) -> str:
+    """Metinden [fn N] göndermelerini temiz biçimde siler (dipnotsuz sürüm)."""
+    cleaned = FN_REF_RE.sub("", text)
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)  # boşluk+noktalama
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+    return cleaned
 
 
 def _ensure_styles(doc, style: dict):
@@ -269,7 +324,19 @@ def export_article_docx(
     section.right_margin = Cm(margins["right"])
 
     _ensure_styles(doc, style)
-    mapping = _build_footnotes_part(doc, doc_model.footnotes, style)
+
+    footnote_mode = resolve_footnote_mode(style)
+    warnings: list[str] = []
+    if footnote_mode == "on" and doc_model.footnote_count == 0:
+        warnings.append(
+            "Dipnot kipi 'on' ama taslakta hiç dipnot yok ([FOOTNOTES]/[fn N] "
+            "bulunamadı). Dipnotsuz derlendi."
+        )
+
+    keep_footnotes = footnote_mode in ("auto", "on")
+    mapping: dict[str, int] = {}
+    if keep_footnotes:
+        mapping = _build_footnotes_part(doc, doc_model.footnotes, style)
 
     if doc_model.title:
         doc.add_paragraph(doc_model.title, style="Title")
@@ -285,32 +352,54 @@ def export_article_docx(
         run = p.add_run(doc_model.vat_label)
         run.font.size = Pt(12)
 
-    if style.get("toc"):
+    # Yazar / kurum: taslak bloğu, yoksa config yedeği (uydurma değer üretilmez).
+    author = (doc_model.author or style.get("author") or "").strip()
+    institution = (doc_model.institution or style.get("institution") or "").strip()
+    if author:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.add_run(author)
+    if institution:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(institution)
+        run.italic = True
+
+    include_toc, toc_mode = resolve_toc_decision(style, doc_model, tr)
+    if include_toc:
         doc.add_heading(style.get("toc_title", "İçindekiler"), level=1)
         _add_field(doc.add_paragraph(), 'TOC \\o "1-2" \\h \\z \\u')
 
     unreferenced: list[str] = []
+    body_has_ref = doc_model.body_text()
     for sec in doc_model.sections:
         if sec.title and sec.title != "GÖVDE":
             doc.add_heading(sec.title, level=1)
         for sub in sec.subsections:
             doc.add_heading(sub.title, level=2)
         for para in sec.paragraphs:
-            if para.text:
+            if not para.text:
+                continue
+            if keep_footnotes:
                 _add_paragraph_with_footnotes(doc, para.text, mapping)
+            else:
+                text = _strip_fn_refs(para.text)
+                if text:
+                    doc.add_paragraph(text)
 
-    referenced = set(mapping.keys())
-    for fn in doc_model.footnotes:
-        if str(fn.num) not in referenced or f"[fn {fn.num}]" not in doc_model.body_text():
-            unreferenced.append(fn.num)
-    if unreferenced:
-        doc.add_heading("Dipnotlar", level=1)
-        table = {fn.num: fn.text for fn in doc_model.footnotes}
-        for num in unreferenced:
-            p = doc.add_paragraph()
-            r = p.add_run(f"{num}. ")
-            r.bold = True
-            p.add_run(table.get(num, ""))
+    if keep_footnotes:
+        referenced = set(mapping.keys())
+        for fn in doc_model.footnotes:
+            if str(fn.num) not in referenced or f"[fn {fn.num}]" not in body_has_ref:
+                unreferenced.append(fn.num)
+        if unreferenced:
+            doc.add_heading("Dipnotlar", level=1)
+            table = {fn.num: fn.text for fn in doc_model.footnotes}
+            for num in unreferenced:
+                p = doc.add_paragraph()
+                r = p.add_run(f"{num}. ")
+                r.bold = True
+                p.add_run(table.get(num, ""))
 
     if style.get("page_numbers"):
         footer = section.footer
@@ -330,5 +419,11 @@ def export_article_docx(
         "paragraphs": doc_model.paragraph_count,
         "footnotes": doc_model.footnote_count,
         "real_footnotes": len(mapping),
+        "footnote_mode": footnote_mode,
+        "toc_mode": toc_mode,
+        "toc_included": include_toc,
+        "author": author,
+        "institution": institution,
+        "warnings": warnings,
         "format": "makale",
     }

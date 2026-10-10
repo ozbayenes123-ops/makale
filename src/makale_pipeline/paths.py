@@ -56,6 +56,18 @@ def target_path_for_source(source_path: Path) -> Path:
     return src.with_name(f"{base}_tr.txt")
 
 
+def find_source_for_target(target_path: Path) -> Path | None:
+    """Hedef *_tr.txt dosyasına karşılık gelen kaynak dosyayı bulur.
+
+    find_source_files + target_path_for_source eşlemesinin tersidir.
+    """
+    target = Path(target_path)
+    for src in find_source_files(target.parent):
+        if target_path_for_source(src) == target:
+            return src
+    return None
+
+
 def resolve_path(root: Path, given: str | Path | None) -> Path | None:
     """Verilen yolu mutlaksa aynen, göreceyse proje köküne göre çözer."""
     if given is None:

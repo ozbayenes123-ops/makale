@@ -59,6 +59,27 @@ When the user wants a footnote-free body-text edition (no `[fn]`, bibliography o
 6. Build the DOCX from a spec JSON (blocks: heading/paragraph-with-style/table, page setup, styles) with python-docx; the makale venv has python-docx, the system python does not — run as `uv run --project C:/dev/mcp/makale python <script>.py`. Format to house style: A4, Times New Roman 12 body / 1.5 spacing, justified, bold centered title, Heading 1/2 hierarchy, PAGE field footer. Page margins come in mm — pass them through `Mm()`, never `Cm()`; a mm value routed through `Cm()` inflates 10× (25mm → 25cm) and fails only later at PDF export with a misleading 'document cannot be prepared for export' error. On tables set `w:cantSplit` per row and `w:tblHeader` on the header row so rows never break across pages and the header repeats on continuation pages.
 7. Verify the finished DOCX programmatically (paragraph/heading/table counts, exact country/heading lists, zero `[fn]` markers), copy deliverables to the Desktop, and assert SHA-256 equality between source and Desktop copy before reporting done. When the user later reports a delivered file missing, re-copy and re-verify immediately instead of recounting delivery history. Programmatic green is not visual green — a unit-bug layout passes every count check while the printed page is garbage. Render the final DOCX to PDF then pymupdf→PNG at ~105dpi. When LibreOffice is absent, Word itself converts: `win32com.client.Dispatch('Word.Application')` → `Documents.Open(src, ReadOnly=True, AddToRecentFiles=False)` → `SaveAs2(dst, FileFormat=17)` (prefer `SaveAs2` over `ExportAsFixedFormat`, which rejects packages `SaveAs2` accepts) → `Quit()`; run under the makale venv (`uv run --project C:/dev/mcp/makale python`). Then vision-check the title page, one heading-transition page, and each table page (margins, overflow, style breaks, heading language) before reporting.
 
+## Terim karşılığı bilinmiyorsa (resmî kaynak turu)
+
+Karşılığı belirsiz/şüpheli bir terim (özellikle hukuk terimi) çıktığında tahmin
+etme; sırayla başvur:
+
+1. **Projede var mı:** `glossary_show`, `glossary_check`, `translation_memory` —
+   daha önce onaylanmış karşılık varsa onu kullan.
+2. **Resmî Türkçe kullanım:** bridge `terim_arastir(terim, mevzuat_ipucu=...)`.
+   Araç mevzuat başlıklarını VE ilgili kanunun metnini tarar, resmî kullanım
+   örneklerini döndürür. Dikkat: `mevzuat_ara` yalnızca BAŞLIK tarar; terim
+   başlıkta geçmiyorsa `mevzuat_ipucu` zorunlu (ör. terim='vatansız',
+   ipucu='Vatandaşlık' → yönetmelik metninden gerçek kullanım örnekleri).
+3. **Yetmiyorsa web araması:** TDK/terim sözlükleri, alan literatürü, kurum
+   çevirileri (mevzuat.gov.tr, resmî kurum siteleri). Kaynağı not et.
+4. **Seçilen karşılığı yaz:** `glossary_add` ile sözlüğe kaynak + gerekçeyle
+   ekle. Karşılıksız bırakılmış ya da uydurulmuş terim yasak; İngilizce terimin
+   belgede kalması da hata sayılır.
+5. **Tutarlılığı doğrula:** `glossary_check` + `quality_scan` ile belgede aynı
+   terimin tek karşılıkla geçtiğini kontrol et; DOCX/PDF çıktısında kalan
+   yabancı terimi kapatmadan teslim etme.
+
 ## Pitfalls
 
 - Build the prompt with `resolve_path(PROJECT_ROOT, ...)` in mind: absolute paths outside the project break `relative_to(PROJECT_ROOT)` — always import under `documents/` first, because the prompt builder assumes project-relative paths.

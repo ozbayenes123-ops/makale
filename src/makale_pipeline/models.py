@@ -40,6 +40,8 @@ class Footnote:
 class StructuredDocument:
     title: str = ""
     subtitle: str = ""
+    author: str = ""
+    institution: str = ""
     vat_label: str = ""
     toc: list[TocEntry] = field(default_factory=list)
     sections: list[Section] = field(default_factory=list)
@@ -64,6 +66,8 @@ class StructuredDocument:
         return {
             "title": self.title,
             "subtitle": self.subtitle,
+            "author": self.author,
+            "institution": self.institution,
             "vat_label": self.vat_label,
             "toc": [{"label": t.label, "anchor": t.anchor} for t in self.toc],
             "sections": [

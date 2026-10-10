@@ -54,10 +54,21 @@ Belge `config.json` içine `docx` bölümü:
     "line_spacing": 1.5,
     "first_line_indent_cm": 1.25,
     "page_numbers": true,
-    "toc": true
+    "toc": "auto",
+    "footnotes": "auto",
+    "author": "",
+    "institution": ""
   }
 }
 ```
+
+- `toc`: `"auto"` (varsayılan) yalnızca taslakta `[TOC]` girişi veya kaynak
+  dosyada gerçek bir içindekiler başlığı varsa İçindekiler ekler; `true`/`false`
+  zorlar.
+- `footnotes`: `"auto"` (taslakta ne varsa) | `"on"` (dipnot isteniyor) |
+  `"off"` (dipnotsuz: `[fn N]` göndermeleri ve dipnot bölümü üretilmez).
+- `author` / `institution`: taslakta `[AUTHOR]`/`[INSTITUTION]` bloğu yoksa
+  kullanılacak yedek değerler.
 
 Tüm anahtarlar için `src/makale_pipeline/config.py` → `DEFAULT_DOCX`.
 

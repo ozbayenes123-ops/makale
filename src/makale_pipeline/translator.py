@@ -76,6 +76,10 @@ Hedef dil   : {target_lang}
 {semantic_protocol}
 === /ANLAM ÖNCELİKLİ ÇEVİRİ PROTOKOLÜ ===
 
+=== ÜSTBİLGİ VE DİPNOT KİPİ (BU BELGE İÇİN BAĞLAYICI) ===
+{docx_rules}
+=== /ÜSTBİLGİ VE DİPNOT KİPİ ===
+
 === KAYNAK METİN (aşağıdaki tüm içerik çevrilecek) ===
 {source_text}
 === /KAYNAK METİN ===
@@ -201,6 +205,42 @@ Okuyucu, bunu bir çeviri olduğunu fark etmemelidir. Bunun için:
 """
 
 
+def _build_docx_rules(config: dict) -> str:
+    """Belge docx ayarlarına göre modele verilecek üstbilgi/dipnot kuralları."""
+    docx = config.get("docx", {}) or {}
+    raw_mode = docx.get("footnotes", "auto")
+    if isinstance(raw_mode, bool):
+        mode = "on" if raw_mode else "off"
+    else:
+        mode = str(raw_mode).strip().lower()
+    if mode not in ("auto", "on", "off"):
+        mode = "auto"
+
+    foot_rule = {
+        "on": (
+            "Dipnot kipi: ON. Kaynaktaki dipnotları üret: gövde metninde [fn N] "
+            "göndermelerini koru ve dosya sonunda [FOOTNOTES] ... [/FOOTNOTES] "
+            "bloğunu (N: metin) mutlaka yaz."
+        ),
+        "off": (
+            "Dipnot kipi: OFF. Dipnot ÜRETME: ne [FOOTNOTES] bloğu ne de [fn N] "
+            "göndermesi yaz. Dipnotu gövde metnine de gömme; dipnot içeriğini atla."
+        ),
+        "auto": (
+            "Dipnot kipi: AUTO. Kaynakta dipnot varsa [fn N] göndermelerini ve "
+            "[FOOTNOTES] bloğunu koru; kaynakta yoksa dipnot ekleme."
+        ),
+    }[mode]
+
+    byline = (
+        "Üstbilgi: Kaynakta yazar adı varsa başlığın altına [AUTHOR] ... [/AUTHOR]; "
+        "kurum/bağlantı (üniversite, bölüm, dergi künyesi) varsa [INSTITUTION] ... "
+        "[/INSTITUTION] bloğu ekle ([AFFILIATION] eşanlamlıdır). Kaynakta yoksa bu "
+        "blokları YAZMA ve hiçbir değer UYDURMA."
+    )
+    return f"- {foot_rule}\n- {byline}"
+
+
 def build_prompt(source_path: Path) -> str:
     """Kaynak dosya için AI asistanına verilecek çeviri promptunu üretir."""
     if not source_path.exists():
@@ -234,6 +274,7 @@ def build_prompt(source_path: Path) -> str:
         target_lang=config.get("target_lang", "tr"),
         document_map=_build_document_map(source_text),
         semantic_protocol=SEMANTIC_PROTOCOL,
+        docx_rules=_build_docx_rules(config),
         source_text=source_text,
         glossary_block=glossary_block,
         qa_checklist=QA_CHECKLIST,
@@ -325,6 +366,13 @@ def apply_translation(source_path: Path, target_path: Path | None = None) -> dic
 
             info = export_article_docx(target, None, style=config.get("docx", {}))
             result["docx"] = str(Path(info["output"]).relative_to(PROJECT_ROOT))
+            result["docx_diagnostics"] = {
+                "footnote_mode": info.get("footnote_mode"),
+                "toc_mode": info.get("toc_mode"),
+                "toc_included": info.get("toc_included"),
+            }
+            if info.get("warnings"):
+                result["warnings"] = list(warnings) + list(info["warnings"])
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "warnings": warnings, "error": f"DOCX derlemesi başarısız: {exc}"}
 

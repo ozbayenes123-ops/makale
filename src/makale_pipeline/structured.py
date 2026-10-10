@@ -3,6 +3,8 @@
 Biçim:
     [TITLE] ... [/TITLE]  (tek satırlık başlık da desteklenir)
     [SUBTITLE] ... [/SUBTITLE]
+    [AUTHOR] ... [/AUTHOR]              (yazar; tek satır)
+    [INSTITUTION] ... [/INSTITUTION]    ([AFFILIATION] eşanlamlı)
     [VAT_LABEL] ... [/VAT_LABEL]
     [BODY]
     [SECTION id="sec1" title="Giriş"]
@@ -37,24 +39,103 @@ PARA_RE = re.compile(r"^p(\d+)\s*:\s*(.*)$")
 FOOTNOTE_RE = re.compile(r"^(\d+)\s*:\s*(.*)$")
 FN_REF_RE = re.compile(r"\[fn\s+(\d+)\]")
 
+# Kaynak metinde gerçek bir içindekiler başlığı sayılan satırlar.
+TOC_HEADING_RE = re.compile(
+    r"^\s*(?:i[cç]indekiler|contents|table\s+of\s+contents|i[̇]?ndeks|fihrist"
+    r"|الفهرس|فهرس)\s*:?\s*$",
+    re.IGNORECASE,
+)
+
+# Yazar/kurum satırı sinyali (uydurmadan yalnızca raporlama için).
+BYLINE_HINT_RE = re.compile(
+    r"(?:"
+    r"\b(?:Dr|Prof|Doç|Assoc|Asst|Öğr|Yrd|Yar)\.?"          # akademik unvan
+    r"|\b(?:University|Üniversitesi|Department|Bölümü|Faculty|Fakültesi"
+    r"|Institute|Enstitüsü|College|School|Press|Journal|Studies|Dergisi)\b"
+    r"|\bss\.\s*\d"                                          # "ss. 972"
+    r"|\(\s*(?:19|20)\d{2}\s*\)"                             # "(2022)"
+    r")",
+    re.IGNORECASE,
+)
+
+_PREAMBLE_TAG_RE = re.compile(r"^\[(/?)([A-Z_]+)(?:\s+[^\]]*)?\]$")
+_TAG_ATTR_RE = re.compile(r'\[/?[A-Z_]+(?:\s+([A-Za-z_]+)="([^"]*)")?[^\]]*\]')
+
 
 def _block_value(lines: list[str], tag: str) -> str:
     """[TAG]...[/TAG] bloğunu veya tek satırlık [TAG] değer satırını okur."""
-    open_tag = f"[{tag}]"
-    close_tag = f"[/{tag}]"
-    collecting = False
-    buf: list[str] = []
-    for line in lines:
-        s = line.strip()
-        if not collecting:
-            if s == open_tag:
-                collecting = True
+    return _block_value_any(lines, (tag,))
+
+
+def _block_value_any(lines: list[str], tags: tuple[str, ...]) -> str:
+    """Verilen etiketlerden ilk dolu bloğun değerini döndürür (eşanlamlı desteği)."""
+    for tag in tags:
+        open_tag = f"[{tag}]"
+        close_tag = f"[/{tag}]"
+        collecting = False
+        buf: list[str] = []
+        for line in lines:
+            s = line.strip()
+            if not collecting:
+                if s == open_tag:
+                    collecting = True
+                    continue
                 continue
+            if s == close_tag:
+                break
+            buf.append(line.rstrip("\n"))
+        value = "\n".join(buf).strip()
+        if value:
+            return value
+    return ""
+
+
+def source_contains_toc_heading(text: str) -> bool:
+    """Kaynak metin gerçekten bir içindekiler başlığı taşıyor mu?
+
+    [TOC] bloğundaki girişler de sayılır. Uydurma TOC üretmemek için
+    yalnızca bu işaret varken içindekiler eklenmesi gerekir.
+    """
+    in_toc = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s == "[TOC]":
+            in_toc = True
             continue
-        if s == close_tag:
-            break
-        buf.append(line.rstrip("\n"))
-    return "\n".join(buf).strip()
+        if s == "[/TOC]":
+            in_toc = False
+            continue
+        if in_toc and s.startswith("-") and s[1:].strip():
+            return True
+        if TOC_HEADING_RE.match(s):
+            return True
+    return False
+
+
+def byline_hint(source_text: str) -> bool:
+    """Kaynağın ilk satırları yazar/kurum taşıyor gibi mi görünüyor?
+
+    Yalnızca doğrulama uyarısı içindir; hiçbir değer uydurulmaz.
+    [TITLE] bloğu dışlanır (başlıktaki yıl parantezi yanlış sinyal vermesin).
+    """
+    head = source_text.split("[BODY]", 1)[0]
+    # Başlık bloklarını (tek satırlık [TITLE]...[/TITLE] dahil) çıkar.
+    head = re.sub(r"\[TITLE\].*?\[/TITLE\]", "", head, flags=re.DOTALL)
+    chunks: list[str] = []
+    for line in head.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        m = _PREAMBLE_TAG_RE.match(s)
+        if m:
+            # Nitelikli tek satırlık etiket (ör. [SUBTITLE title="Eray Alim, ..."])
+            for _attr, value in _TAG_ATTR_RE.findall(s):
+                if value.strip():
+                    chunks.append(value.strip())
+            continue
+        chunks.append(s)
+    blob = "\n".join(chunks)
+    return bool(BYLINE_HINT_RE.search(blob))
 
 
 def is_structured_document(text: str) -> bool:
@@ -71,6 +152,8 @@ def parse_document(text: str) -> StructuredDocument:
 
     doc.title = _block_value(lines, "TITLE")
     doc.subtitle = _block_value(lines, "SUBTITLE")
+    doc.author = _block_value(lines, "AUTHOR")
+    doc.institution = _block_value_any(lines, ("INSTITUTION", "AFFILIATION"))
     doc.vat_label = _block_value(lines, "VAT_LABEL")
 
     # TOC satırları: "- etiket" (bağlantı bilgisi korunmaz, yeniden üretilir)
@@ -159,6 +242,10 @@ def serialize_document(doc: StructuredDocument) -> str:
         lines += ["[TITLE]", doc.title, "[/TITLE]", ""]
     if doc.subtitle:
         lines += ["[SUBTITLE]", doc.subtitle, "[/SUBTITLE]", ""]
+    if doc.author:
+        lines += ["[AUTHOR]", doc.author, "[/AUTHOR]", ""]
+    if doc.institution:
+        lines += ["[INSTITUTION]", doc.institution, "[/INSTITUTION]", ""]
     if doc.vat_label:
         lines += ["[VAT_LABEL]", doc.vat_label, "[/VAT_LABEL]", ""]
     lines.append("[BODY]")

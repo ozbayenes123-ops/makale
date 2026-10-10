@@ -24,8 +24,14 @@ DEFAULT_DOCX: dict[str, Any] = {
     "footnote_size_pt": 10,
     "page_numbers": True,
     "page_number_position": "bottom_center",
-    "toc": True,
+    # İçindekiler: "auto" (kaynakta varsa) | true (zorla) | false (kapalı)
+    "toc": "auto",
     "toc_title": "İçindekiler",
+    # Dipnot kipi: "auto" (taslakta ne varsa) | "on" (isteniyor) | "off" (dipnotsuz)
+    "footnotes": "auto",
+    # Üstbilgi yedeği: [AUTHOR]/[INSTITUTION] bloğu yoksa kullanılır.
+    "author": "",
+    "institution": "",
 }
 
 DEFAULT_CONFIG: dict[str, Any] = {

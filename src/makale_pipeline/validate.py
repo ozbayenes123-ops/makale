@@ -15,6 +15,7 @@ from makale_pipeline.paths import (
 )
 from makale_pipeline.quality import scan_text
 from makale_pipeline.structured import (
+    byline_hint,
     extract_fn_refs,
     is_structured_document,
     parse_document,
@@ -113,6 +114,19 @@ def validate_pair(source_path: Path, target_path: Path) -> list[str]:
         warnings.append(
             f"Dipnot listesi: kaynak={source.footnote_count}, hedef={target.footnote_count}"
         )
+
+    # Yazar/kurum: kaynakta varsa ama hedefte yoksa raporla (değer uydurulmaz).
+    if target.title and not (target.author or target.institution):
+        if source.author or source.institution:
+            warnings.append(
+                "Hedefte [AUTHOR]/[INSTITUTION] yok ama kaynakta yazar/kurum "
+                "bilgisi var — başlık altında yazar/kurum bloğu ekleyin."
+            )
+        elif byline_hint(src_raw):
+            warnings.append(
+                "Kaynağın ilk satırları yazar/kurum taşıyor gibi görünüyor ama "
+                "hedefte [AUTHOR]/[INSTITUTION] yok — değerleri kaynaktan alıp ekleyin."
+            )
 
     src_len = len(source.body_text())
     tr_len = len(target.body_text())
