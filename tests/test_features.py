@@ -132,3 +132,56 @@ def test_read_feedback_empty(tmp_path):
     info = export_article_docx(tr, tr.with_suffix(".docx"), style={})
     rep = read_feedback(info["output"])
     assert rep["ok"] is True and rep["total"] == 0
+
+
+def test_ustbilgi_isaretci_bicimleri():
+    """Üstbilgi işaretçileri hem blok hem tek satır/kapanışsız biçimde okunmalı."""
+    from makale_pipeline.structured import parse_document
+
+    # tek satırlı blok + tırnaklı öznitelik + öznitelikli SECTION
+    doc = parse_document(
+        "[TITLE]Başlık[/TITLE]\n"
+        '[SUBTITLE title=“Yazar, Dergi 1/2 (1995)”]\n'
+        "[AUTHOR]Yazar Adı[/AUTHOR]\n"
+        "[INSTITUTION]Kurum[/INSTITUTION]\n"
+        "[BODY]\n"
+        "[SECTION title=“Özet”]\n"
+        "p1: metin\n"
+    )
+    assert doc.title == "Başlık"
+    assert doc.subtitle == "Yazar, Dergi 1/2 (1995)"
+    assert doc.author == "Yazar Adı"
+    assert doc.institution == "Kurum"
+    assert doc.sections[0].title == "Özet"
+
+    # çok satırlı blok biçimi de çalışmalı
+    doc2 = parse_document(
+        "[TITLE]\nUzun Başlık\n[/TITLE]\n[BODY]\np1: metin\n"
+    )
+    assert doc2.title == "Uzun Başlık"
+
+
+def test_ustbilgi_docx_e_yazilir(tmp_path):
+    """Yazar/kurum/alt başlık derlenen DOCX'te görünmeli (eskiden kayboluyordu)."""
+    import re
+    import zipfile
+
+    src = tmp_path / "makale_en.txt"
+    src.write_text("[TITLE]English Title[/TITLE]\n[BODY]\np1: source\n", encoding="utf-8")
+    tr = tmp_path / "makale_tr.txt"
+    tr.write_text(
+        "[TITLE]Türkçe Başlık[/TITLE]\n"
+        "[SUBTITLE]Dergi 5/1 (2000), ss. 1-10[/SUBTITLE]\n"
+        "[AUTHOR]Ayşe Yılmaz[/AUTHOR]\n"
+        "[INSTITUTION]Örnek Üniversitesi[/INSTITUTION]\n"
+        "[BODY]\np1: çeviri metni\n[/BODY]\n",
+        encoding="utf-8",
+    )
+    info = export_article_docx(tr, tmp_path / "makale_tr.docx", style={})
+    xml = zipfile.ZipFile(info["output"]).read("word/document.xml").decode()
+    text = " ".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml))
+    assert "Türkçe Başlık" in text
+    assert "Ayşe Yılmaz" in text
+    assert "Örnek Üniversitesi" in text
+    assert "Dergi 5/1 (2000), ss. 1-10" in text
+    assert "İçindekiler" not in text  # kaynakta TOC yok → uydurma içindekiler yok

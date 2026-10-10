@@ -33,8 +33,43 @@ from makale_pipeline.models import (
     TocEntry,
 )
 
-SECTION_RE = re.compile(r'\[SECTION\s+id="([^"]*)"\s+title="([^"]*)"\s*\]')
-SUBSECTION_RE = re.compile(r'\[SUBSECTION\s+title="([^"]*)"\s*\]')
+_QUOTE_CHARS = "“”\"'‘’"
+SECTION_RE = re.compile(r"\[SECTION(?P<attrs>[^\]]*)\]")
+SUBSECTION_RE = re.compile(r"\[SUBSECTION(?P<attrs>[^\]]*)\]")
+MARKER_ATTR_RE = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[" + _QUOTE_CHARS + r"]([^" + _QUOTE_CHARS + r"]*)[" + _QUOTE_CHARS + r"]"
+)
+
+
+def marker_attr(text: str, name: str) -> str:
+    """`[TAG ... name=“değer”]` işaretçisinden özniteliği okur (tırnak türü esnek)."""
+    match = re.search(
+        rf"\b{re.escape(name)}\s*=\s*[{_QUOTE_CHARS}]([^{_QUOTE_CHARS}]*)[{_QUOTE_CHARS}]",
+        text or "",
+    )
+    return match.group(1).strip() if match else ""
+
+
+def single_marker_value(lines: list[str], tag: str) -> str:
+    """Kapanışsız tek işaretçiyi okur: `[TAG title="X"]` veya `[TAG X]`.
+
+    Taslaklarda üstbilgi işaretçileri iki biçimde yazılabiliyor; kapanışsız
+    biçim eskiden hiç okunmuyordu ve yazar/kurum satırı kayboluyordu
+    (`[SUBTITLE title="Yazar, Dergi …"]`).
+    """
+    pattern = re.compile(rf"\[{tag}(?P<attrs>[^\]]*)\]")
+    for line in lines:
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        attrs = match.group("attrs")
+        value = marker_attr(attrs, "title") or marker_attr(attrs, "value")
+        if value:
+            return value
+        value = attrs.strip()
+        if value:
+            return value
+    return ""
 PARA_RE = re.compile(r"^p(\d+)\s*:\s*(.*)$")
 FOOTNOTE_RE = re.compile(r"^(\d+)\s*:\s*(.*)$")
 FN_REF_RE = re.compile(r"\[fn\s+(\d+)\]")
@@ -68,23 +103,23 @@ def _block_value(lines: list[str], tag: str) -> str:
 
 
 def _block_value_any(lines: list[str], tags: tuple[str, ...]) -> str:
-    """Verilen etiketlerden ilk dolu bloğun değerini döndürür (eşanlamlı desteği)."""
+    """Verilen etiketlerden ilk dolu bloğun değerini döndürür (eşanlamlı desteği).
+
+    İki biçim desteklenir:
+      çok satırlı:  [TAG]\\n değer \\n[/TAG]
+      tek satırlı:  [TAG]değer[/TAG]     (çeviri taslaklarında sık görülür)
+    Tek satırlı biçim eskiden okunmuyordu; başlık/alt başlık/yazar kayboluyordu.
+    """
+    text = "\n".join(lines)
     for tag in tags:
-        open_tag = f"[{tag}]"
-        close_tag = f"[/{tag}]"
-        collecting = False
-        buf: list[str] = []
-        for line in lines:
-            s = line.strip()
-            if not collecting:
-                if s == open_tag:
-                    collecting = True
-                    continue
-                continue
-            if s == close_tag:
-                break
-            buf.append(line.rstrip("\n"))
-        value = "\n".join(buf).strip()
+        match = re.search(rf"\[{tag}\](.*?)\[/{tag}\]", text, re.S | re.I)
+        if match:
+            value = "\n".join(p.strip() for p in match.group(1).splitlines()).strip()
+            if value:
+                return value
+    # Kapanışsız tek işaretçi biçimi: [TAG title="…"] / [TAG …]
+    for tag in tags:
+        value = single_marker_value(lines, tag)
         if value:
             return value
     return ""
@@ -204,7 +239,11 @@ def parse_document(text: str) -> StructuredDocument:
             continue
         m_sec = SECTION_RE.match(s)
         if m_sec:
-            current = Section(section_id=m_sec.group(1), title=m_sec.group(2))
+            attrs = m_sec.group("attrs")
+            current = Section(
+                section_id=marker_attr(attrs, "id") or f"sec{len(doc.sections) + 1}",
+                title=marker_attr(attrs, "title") or "GÖVDE",
+            )
             doc.sections.append(current)
             continue
         if s == "[/SECTION]":
@@ -212,7 +251,8 @@ def parse_document(text: str) -> StructuredDocument:
             continue
         m_sub = SUBSECTION_RE.match(s)
         if m_sub:
-            ensure_section().subsections.append(Subsection(title=m_sub.group(1)))
+            title = marker_attr(m_sub.group("attrs"), "title") or "Alt başlık"
+            ensure_section().subsections.append(Subsection(title=title))
             continue
         m_para = PARA_RE.match(s)
         if m_para:
