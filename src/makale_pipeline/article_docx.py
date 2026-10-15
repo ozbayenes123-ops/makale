@@ -111,10 +111,73 @@ def _strip_fn_refs(text: str) -> str:
     return cleaned
 
 
+def _force_font(style, font: str) -> None:
+    """Stil yazı tipini tema bağımsız sabitler.
+
+    `style.font.name = X` yalnızca w:ascii/w:hAnsi yazar; şablondan gelen
+    w:asciiTheme="minorHAnsi" özniteliği silinmezse Word tema yazı tipini
+    (Calibri) kullanır ve başlık/alt başlık TNR görünmez. Ölçüldü: Word'de
+    Title/Heading paragrafları Calibri çıkıyordu.
+    """
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        rfonts = OxmlElement("w:rFonts")
+        rpr.insert(0, rfonts)
+    for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:cstheme", "w:eastAsiaTheme"):
+        if rfonts.get(qn(attr)) is not None:
+            del rfonts.attrib[qn(attr)]
+    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+        rfonts.set(qn(attr), font)
+
+
+def _force_doc_default_font(doc, font: str) -> None:
+    """docDefaults rPrDefault yazı tipini de sabitler (kalıtılan her şey için)."""
+    styles_el = doc.styles.element
+    rpr_default = styles_el.find(qn("w:docDefaults") + "/" + qn("w:rPrDefault"))
+    if rpr_default is None:
+        return
+    rpr = rpr_default.find(qn("w:rPr"))
+    if rpr is None:
+        rpr = OxmlElement("w:rPr")
+        rpr_default.append(rpr)
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        rfonts = OxmlElement("w:rFonts")
+        rpr.insert(0, rfonts)
+    for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:cstheme", "w:eastAsiaTheme"):
+        if rfonts.get(qn(attr)) is not None:
+            del rfonts.attrib[qn(attr)]
+    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+        rfonts.set(qn(attr), font)
+
+
+def _normalize_all_fonts(doc, font: str) -> None:
+    """Şablondaki dokunulmamış her stilde tema özniteliğini siler.
+
+    Yalnızca düzenlediğimiz stillere bakmak yetmez: python-docx şablonundaki
+    diğer stiller (Hyperlink, List Paragraph, Quote, ...) hâlâ
+    `asciiTheme="minorHAnsi"` taşır ve Word o alanlarda tema yazı tipini
+    (Calibri/Cambria) kullanır. Test, styles.xml genelinde tema özniteliği
+    kalmamasını şart koşar.
+    """
+    styles_el = doc.styles.element
+    for rfonts in styles_el.iter(qn("w:rFonts")):
+        for attr in ("w:asciiTheme", "w:hAnsiTheme", "w:cstheme", "w:eastAsiaTheme"):
+            if rfonts.get(qn(attr)) is not None:
+                del rfonts.attrib[qn(attr)]
+        for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+            val = rfonts.get(qn(attr))
+            if val is None or val in ("Cambria", "Calibri", "Calibri Light"):
+                rfonts.set(qn(attr), font)
+
+
 def _ensure_styles(doc, style: dict):
-    """Normal/Title/Heading/Footnote stillerini makale biçimine sokar."""
+    """Normal/Title/Heading/Subtitle/Footnote stillerini makale biçimine sokar."""
     body_font = style["body_font"]
     body_size = Pt(style["body_size_pt"])
+
+    _force_doc_default_font(doc, body_font)
 
     normal = doc.styles["Normal"]
     normal.font.name = body_font
@@ -125,13 +188,7 @@ def _ensure_styles(doc, style: dict):
     pf.line_spacing = style["line_spacing"]
     pf.space_after = Pt(style["space_after_pt"])
     pf.first_line_indent = Cm(style["first_line_indent_cm"])
-    rpr = normal.element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = OxmlElement("w:rFonts")
-        rpr.append(rfonts)
-    for attr in ("w:ascii", "w:hAnsi", "w:cs"):
-        rfonts.set(qn(attr), body_font)
+    _force_font(normal, body_font)
 
     title = doc.styles["Title"]
     title.font.name = body_font
@@ -140,6 +197,19 @@ def _ensure_styles(doc, style: dict):
     title.font.color.rgb = RGBColor(0, 0, 0)
     title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(12)
+    _force_font(title, body_font)
+
+    try:
+        subtitle = doc.styles["Subtitle"]
+    except KeyError:
+        subtitle = None
+    if subtitle is not None:
+        subtitle.font.name = body_font
+        subtitle.font.size = Pt(style["subtitle_size_pt"])
+        subtitle.font.bold = False
+        subtitle.font.italic = True
+        subtitle.font.color.rgb = RGBColor(0, 0, 0)
+        _force_font(subtitle, body_font)
 
     for name, size_key, bold, italic in (
         ("Heading 1", "heading1_size_pt", True, False),
@@ -154,6 +224,7 @@ def _ensure_styles(doc, style: dict):
         hs.paragraph_format.space_before = Pt(12 if name == "Heading 1" else 6)
         hs.paragraph_format.space_after = Pt(6 if name == "Heading 1" else 3)
         hs.paragraph_format.keep_with_next = True
+        _force_font(hs, body_font)
 
     try:
         fn_text = doc.styles["Footnote Text"]
@@ -164,12 +235,16 @@ def _ensure_styles(doc, style: dict):
     fn_text.font.color.rgb = RGBColor(0, 0, 0)
     fn_text.paragraph_format.space_after = Pt(2)
     fn_text.paragraph_format.line_spacing = 1.0
+    _force_font(fn_text, body_font)
 
     try:
         fn_ref = doc.styles["Footnote Reference"]
     except KeyError:
         fn_ref = doc.styles.add_style("Footnote Reference", WD_STYLE_TYPE.CHARACTER)
     fn_ref.font.superscript = True
+    _force_font(fn_ref, body_font)
+
+    _normalize_all_fonts(doc, body_font)
 
 
 def _add_field(paragraph, instr: str):

@@ -185,3 +185,37 @@ def test_ustbilgi_docx_e_yazilir(tmp_path):
     assert "Örnek Üniversitesi" in text
     assert "Dergi 5/1 (2000), ss. 1-10" in text
     assert "İçindekiler" not in text  # kaynakta TOC yok → uydurma içindekiler yok
+
+
+def test_stillerde_tema_yazitipi_kalmiyor(tmp_path):
+    """Title/Heading/Subtitle TNR olmalı; tema (Calibri) özniteliği silinmeli."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    src = tmp_path / "a_en.txt"
+    src.write_text("[TITLE]English[/TITLE]\n[BODY]\np1: s\n[/BODY]\n", encoding="utf-8")
+    tr = tmp_path / "a_tr.txt"
+    tr.write_text(
+        "[TITLE]Türkçe Başlık[/TITLE]\n[SUBTITLE]Alt Başlık[/SUBTITLE]\n"
+        "[BODY]\n[SECTION id=\"s1\" title=\"Giriş\"]\np1: metin\n[/SECTION]\n[/BODY]\n",
+        encoding="utf-8",
+    )
+    info = export_article_docx(tr, tmp_path / "a_tr.docx", style={})
+    styles = zipfile.ZipFile(info["output"]).read("word/styles.xml").decode()
+    assert "asciiTheme" not in styles and "hAnsiTheme" not in styles
+    assert "Cambria" not in styles
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    root = ET.fromstring(styles)
+    by_id = {
+        el.get(f"{{{ns['w']}}}styleId"): el
+        for el in root.findall("w:style", ns)
+    }
+    for sid in ("Title", "Subtitle", "Heading1", "Heading2", "Normal"):
+        style_el = by_id.get(sid)
+        assert style_el is not None, sid
+        fonts = style_el.find("w:rPr/w:rFonts", ns)
+        assert fonts is not None, f"{sid} rFonts yok"
+        assert (
+            fonts.get(f"{{{ns['w']}}}ascii") == "Times New Roman"
+        ), f"{sid} TNR değil: {fonts.attrib}"

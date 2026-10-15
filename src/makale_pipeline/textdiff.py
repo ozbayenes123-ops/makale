@@ -69,6 +69,7 @@ def chunk_prompts(source_path: Path | str, max_chars: int = 12000) -> dict:
     from makale_pipeline.models import StructuredDocument
     from makale_pipeline.translator import (
         PROMPT_TEMPLATE, QA_CHECKLIST, SEMANTIC_PROTOCOL, _build_document_map,
+        _build_docx_rules,
     )
     from makale_pipeline import PROJECT_ROOT
 
@@ -109,6 +110,7 @@ def chunk_prompts(source_path: Path | str, max_chars: int = 12000) -> dict:
                 target_lang=config.get("target_lang", "tr"),
                 document_map=_build_document_map(sub_text),
                 semantic_protocol=SEMANTIC_PROTOCOL,
+                docx_rules=_build_docx_rules(config),
                 source_text=sub_text,
                 glossary_block=gloss_block,
                 qa_checklist=QA_CHECKLIST,
