@@ -17,3 +17,5 @@ __pycache__/
 
 incoming/
 scratch/
+documents/
+tests/tmp/
