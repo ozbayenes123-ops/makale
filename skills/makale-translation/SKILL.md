@@ -29,6 +29,15 @@ Class-level workflow for English→Turkish academic translation through `C:/dev/
 4. Verify with new tools in order: `translate_diff` (expect missing 0 / extra 0) → `validate_document` → `quality_scan` → apply only scoped, meaning-preserving `quality_fix` changes; do not run broad `apply_safe` cleanup when warnings span untouched content or include legitimate citation/heading fragments, because it can silently rewrite beyond the requested scope. Then run `translate_apply` (validates AND compiles the DOCX itself — its result carries the `docx` path, so a separate `export_docx` is only needed for re-exports) → `bibliography` when footnotes exist. Report unresolved validator/quality warnings plainly rather than treating successful compilation as a clean validation. When the user suspects body text migrated into footnotes (or the reverse), settle it before editing: compare TR/EN length ratios per `pN` and per footnote (healthy band ≈0.5–2.2) and match each TR footnote to its EN footnote first — a TR footnote mirroring its EN footnote is source structure, not displacement.
 5. Report: what changed, verification output, what remains — in Turkish, matching the ask length.
 
+## Turkish Naturalness Review (ikinci geçiş kontrolü)
+
+Çeviri bittikten sonra Türkçeyi tek başına okunabilirlik açısından geç:
+kaynak cümlesinin iskeletini koruyan, gereksiz zamir taşıyan, kalıp tercüme
+kokan her cümleyi anlamından yeniden kur. Sınıf sınıf teşhis kalıpları,
+künye/yazım hijyeni ve kaynak hatasını koruma kuralı için
+`references/turkish-naturalness.md`. Yamalardan sonra eski ifadelerin
+kalktığını grep ile kanıtla, derlemeyi yenile, paragraf sayısını doğrula.
+
 ## Math-to-Prose Adaptation (see `references/math-to-prose.md`)
 
 - Never copy formula/symbol runs into Turkish; write the verbal claim instead.
@@ -103,5 +112,6 @@ etme; sırayla başvur:
 - `references/math-to-prose.md` — formula-to-prose rewrite recipe + forbidden-pattern list.
 - `references/dergipark-recommendations.md` — profile translated corpus on disk, then search/cite DergiPark reading suggestions.
 - `references/pdf-layout-to-structured.md` — rebuild scanned/academic layout PDFs (body/footnote zone split by span size, superscript `[fn N]` recovery, OCR digit repair, table grid reconstruction) into makale structured format.
+- `references/turkish-naturalness.md` — second-pass Turkish review: translationese, pronoun dropping, collocation and citation-hygiene defect classes.
 
 The Main-Text-Only Rework section above is self-contained; no separate reference file is needed for it.
