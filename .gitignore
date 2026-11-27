@@ -19,3 +19,5 @@ incoming/
 scratch/
 documents/
 tests/tmp/
+
+*.egg-info/

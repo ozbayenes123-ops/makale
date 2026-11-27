@@ -1,2 +1,0 @@
-[console_scripts]
-makale = makale_pipeline.cli:main
